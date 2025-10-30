@@ -16,7 +16,7 @@ export default function App() {
     (async () => {
       // 1) Load & parse CSV
       const text = await fetch(CSV_URL).then((r) => r.text());
-      const parsed = d3.csvParse(text, (d) => ({
+      const parsed = d3.csvParse(text, (d: Record<string, string | undefined>) => ({
         artist: String(d.artist ?? "").trim(),
         weeks: +String(d.weeks ?? 0),
       })) as Row[];
@@ -24,7 +24,7 @@ export default function App() {
       // Clean + take top 50
       const data = parsed
         .filter((d) => d.artist && Number.isFinite(d.weeks) && d.weeks > 0)
-        .sort((a, b) => b.weeks - a.weeks)
+        .sort((a: Row, b: Row) => b.weeks - a.weeks)
         .slice(0, 50);
 
       if (destroyed || !mountRef.current || data.length === 0) return;
@@ -38,8 +38,8 @@ export default function App() {
 
       const root = d3
         .hierarchy<{ children: Row[] }>({ children: data } as any)
-        .sum((d: any) => d.weeks)
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+        .sum((d: Row) => d.weeks)
+        .sort((a: d3.HierarchyNode<Row>, b: d3.HierarchyNode<Row>) => (b.value ?? 0) - (a.value ?? 0));
 
       const treemap = d3
         .treemap<any>()
@@ -50,7 +50,7 @@ export default function App() {
 
       const leaves = treemap(root).leaves();
 
-      const extent = d3.extent(data, (d) => d.weeks) as [number, number];
+      const extent = d3.extent(data, (d: Row) => d.weeks) as [number, number];
       const [vmin, vmax] = extent;
       const color = d3
         .scaleSequential(d3.interpolateRgbBasis([
@@ -95,55 +95,54 @@ export default function App() {
         .data(leaves)
         .join("g")
         .attr("class", "tile")
-        .attr("transform", (d) => `translate(${d.x0},${d.y0})`);
+        .attr("transform", (d: any) => `translate(${d.x0},${d.y0})`);
 
-      const rects = nodes
+      nodes
         .append("rect")
         .attr("rx", 6)
         .attr("ry", 6)
-        .attr("width", (d) => Math.max(0, d.x1 - d.x0))
-        .attr("height", (d) => Math.max(0, d.y1 - d.y0))
+        .attr("width", (d: any) => Math.max(0, d.x1 - d.x0))
+        .attr("height", (d: any) => Math.max(0, d.y1 - d.y0))
         .attr("fill", (d: any) => color(d.data.weeks))
         .attr("stroke", "#0b1a33")
         .attr("stroke-opacity", 0.15)
         .attr("cursor", "default")
-        .on("pointerenter", function (event, d: any) {
-          d3.select(this).attr("stroke-opacity", 0.6).attr("stroke-width", 1.5);
-          d3.selectAll<SVGRectElement, any>(".tile rect").filter((n) => n !== d).attr("opacity", 0.85);
+        .on("pointerenter", (event: PointerEvent, d: any) => {
+          const rect = event.currentTarget as SVGRectElement;
+          d3.select(rect).attr("stroke-opacity", 0.6).attr("stroke-width", 1.5);
+          d3.selectAll<SVGRectElement, any>(".tile rect")
+            .filter((n: any) => n !== d)
+            .attr("opacity", 0.85);
           tooltip
             .style("opacity", "1")
             .html(
-              `<strong>${escapeHtml(d.data.artist)}</strong><br/>${d.data.weeks} week${d.data.weeks === 1 ? "" : "s"
-              }`
+              `<strong>${escapeHtml(d.data.artist)}</strong><br/>${d.data.weeks} week${d.data.weeks === 1 ? "" : "s"}`
             );
         })
-        .on("pointermove", function (event) {
+        .on("pointermove", (event: PointerEvent) => {
           const { pageX, pageY } = event;
           tooltip.style("left", pageX + 12 + "px").style("top", pageY + 12 + "px");
         })
-        .on("pointerleave", function () {
-          d3.select(this).attr("stroke-opacity", 0.15).attr("stroke-width", 1);
+        .on("pointerleave", (event: PointerEvent) => {
+          const rect = event.currentTarget as SVGRectElement;
+          d3.select(rect).attr("stroke-opacity", 0.15).attr("stroke-width", 1);
           d3.selectAll<SVGRectElement, any>(".tile rect").attr("opacity", 1);
           tooltip.style("opacity", "0");
         });
 
       // Labels (truncate to fit)
-      nodes.each(function (d: any) {
-        const group = d3.select(this);
+      nodes.each((d: any, i: number, groups: any[]) => {
+        //const group = d3.select(groups[i] as SVGGElement);
         const w = Math.max(0, d.x1 - d.x0);
         const h = Math.max(0, d.y1 - d.y0);
-
         // Only label if there's room
         if (w < 48 || h < 28) return;
-
         const name = d.data.artist;
         const weeks = d.data.weeks;
-
         // rough character budget based on tile width
         const maxChars = Math.max(4, Math.floor((w - 10) / 7));
         const nameShort = name.length > maxChars ? name.slice(0, maxChars - 1) + "…" : name;
-
-        group
+        d3.select(groups[i])
           .append("text")
           .attr("x", 8)
           .attr("y", 16)
@@ -152,9 +151,8 @@ export default function App() {
           .attr("font-size", 18)
           .attr("font-family", "system-ui, -apple-system, Segoe UI, Roboto, sans-serif")
           .text(nameShort);
-
         if (h >= 44) {
-          group
+          d3.select(groups[i])
             .append("text")
             .attr("x", 8)
             .attr("y", 32)
@@ -190,23 +188,23 @@ export default function App() {
         .attr("font-family", "system-ui, -apple-system, Segoe UI, Roboto, sans-serif")
         .text("Weeks");
       const lx = d3.scaleLinear().domain([vmin, vmax]).range([0, legendW]);
-      const gradData = d3.ticks(vmin, vmax, 8).map((t) => ({ x: lx(t), t, c: color(t) }));
+      const gradData = d3.ticks(vmin, vmax, 8).map((t: number) => ({ x: lx(t), t, c: color(t) }));
       legend
         .append("g")
         .attr("transform", "translate(0,16)")
         .selectAll("rect")
-        .data(d3.pairs(gradData))
+        .data(d3.pairs(gradData) as any)
         .join("rect")
-        .attr("x", (d) => d[0].x)
+        .attr("x", (d: any) => d[0].x)
         .attr("y", 0)
-        .attr("width", (d) => Math.max(0, d[1].x - d[0].x))
+        .attr("width", (d: any) => Math.max(0, d[1].x - d[0].x))
         .attr("height", 10)
-        .attr("fill", (d) => d[0].c);
+        .attr("fill", (d: any) => d[0].c);
       const legendAxis = legend
         .append("g")
         .attr("transform", "translate(0,28)")
         .call(d3.axisBottom(lx).ticks(5).tickSize(4))
-        .call((g) => g.select(".domain").remove());
+        .call((g: any) => g.select(".domain").remove());
 
       legendAxis
         .selectAll("text")
