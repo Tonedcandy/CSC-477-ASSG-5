@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 //@ts-ignore
 import * as d3 from "d3";
 
