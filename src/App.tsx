@@ -31,7 +31,20 @@ type ParsedRow = {
   value: number;// computed as 51 - rank (or points if you add)
 };
 
-type Frame = { week: string; entries: ParsedRow[] };
+type FrameEntry = {
+  week: string;
+  rank: number;
+  rankThisWeek: number | null;
+  title: string;
+  artist: string;
+  id: string;
+  value: number;
+  valueYear: number;
+  valueWindow: number;
+  valueLifetime: number;
+};
+
+type Frame = { week: string; entries: FrameEntry[] };
 
 // ------------------------- Demo data (tiny sample) -------------------------
 const DEMO_CSV = `chart_week,current_week,title,performer,last_week,peak_pos,wks_on_chart
@@ -189,7 +202,7 @@ function ensureLabelSpans(textSel: d3.Selection<SVGTextElement, any, any, any>) 
   return { titleSpan, artistSpan, titleNode };
 }
 
-function formatLabelText(node: SVGTextElement, datum: any, availableWidth: number) {
+function formatLabelText(node: SVGTextElement, datum: FrameEntry, availableWidth: number) {
   const textSel = d3.select(node);
   const { titleSpan, artistSpan, titleNode } = ensureLabelSpans(textSel);
   const title = datum?.title ?? "";
@@ -274,7 +287,7 @@ function makeFrames(
   parsedAllForMeta?: ParsedRow[]
 ): Frame[] {
   // Group rows by week string
-  const byWeek = d3.group(parsed, (d) => d.week);
+  const byWeek = d3.group<ParsedRow, string>(parsed, (d: ParsedRow) => d.week);
 
   // All IDs & display metadata across the filtered dataset
   const metaAll = new Map<string, { title: string; artist: string }>();
@@ -284,7 +297,7 @@ function makeFrames(
   });
 
   // Build sorted list of observed week dates
-  const weekDates: Date[] = Array.from(byWeek.keys())
+  const weekDates: Date[] = Array.from<string>(byWeek.keys())
     .map((s) => parseDate?.(s) ?? new Date(s))
     .filter((d): d is Date => d instanceof Date && !isNaN(+d))
     .sort(d3.ascending);
@@ -328,8 +341,10 @@ function makeFrames(
     }
 
     // Rows for this real week (may be empty if we filled a gap)
-    const rows = (byWeek.get(iso) ?? []).slice().sort((a, b) => d3.ascending(a.rank, b.rank));
-    const rowMap = new Map(rows.map((r) => [r.id, r]));
+    const rows = (byWeek.get(iso) ?? [])
+      .slice()
+      .sort((a: ParsedRow, b: ParsedRow) => d3.ascending(a.rank, b.rank));
+    const rowMap = new Map<string, ParsedRow>(rows.map((r: ParsedRow) => [r.id, r]));
 
     // Update counters/metadata for songs present this week
     for (const r of rows) {
@@ -349,7 +364,7 @@ function makeFrames(
     }
 
     // Build candidates
-    const candidates: any[] = [];
+    const candidates: FrameEntry[] = [];
     ids.forEach((id) => {
       let displayMeta = meta.get(id) ?? metaAll.get(id);
       if (!displayMeta) {
@@ -376,9 +391,6 @@ function makeFrames(
         rankThisWeek,
         title: displayMeta.title,
         artist: displayMeta.artist,
-        last_week: null,
-        peak: null,
-        weeks: 0,
         id,
         value,               // drives width + sorting
         valueYear: valYTD,   // YTD
@@ -388,7 +400,9 @@ function makeFrames(
     });
 
     // Sort by selected metric desc, tie-break by rank asc
-    candidates.sort((a, b) => d3.descending(a.value, b.value) || d3.ascending(a.rank, b.rank));
+    candidates.sort(
+      (a, b) => d3.descending<number>(a.value, b.value) || d3.ascending<number>(a.rank, b.rank)
+    );
 
     frames.push({ week: iso, entries: candidates.slice(0, topN) });
   }
@@ -494,11 +508,13 @@ const BillboardBarRace: React.FC<RaceProps> = ({
     const cur = frames[frameIdx];
     const prev = frames[(frameIdx - 1 + frames.length) % frames.length];
 
-    const prevMap = new Map(prev.entries.map((d) => [d.id, d]));
-    const yearMaxValue = Math.max(
-      1,
-      d3.max(frames.slice(0, endIdx + 1), (f) => d3.max(f.entries, (d: any) => d.value) as number) || 1
-    );
+    const prevMap = new Map<string, FrameEntry>(prev.entries.map((d) => [d.id, d]));
+    const yearMaxValue =
+      Math.max(
+        1,
+        d3.max(frames.slice(0, endIdx + 1), (frame: Frame) => d3.max(frame.entries, (entry: FrameEntry) => entry.value) ?? 0) ??
+        1
+      );
     const x = d3.scaleLinear().domain([0, yearMaxValue]).range([0, innerW]);
 
     const y = d3
@@ -521,7 +537,7 @@ const BillboardBarRace: React.FC<RaceProps> = ({
     let palette = BASE.slice(0, Math.min(BASE.length, needed));
     if (palette.length < needed) {
       const extraN = needed - palette.length;
-      const extra = d3.range(extraN).map((i) => d3.interpolateSinebow((i + 1) / (extraN + 1)));
+      const extra = d3.range(extraN).map((i: number) => d3.interpolateSinebow((i + 1) / (extraN + 1)));
       palette = palette.concat(extra);
     }
     const color = d3
@@ -545,7 +561,7 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       tooltipSel.style("left", `${clampedX + window.scrollX}px`).style("top", `${clampedY + window.scrollY}px`);
     };
 
-    const formatTooltipHtml = (datum: any) => {
+    const formatTooltipHtml = (datum: FrameEntry) => {
       const title = escapeHtml(datum?.title ?? "");
       const artist = escapeHtml(datum?.artist ?? "");
       const vy = datum?.valueYear ?? 0;
@@ -568,7 +584,7 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       `;
     };
 
-    const showTooltip = (event: MouseEvent, datum: any) => {
+    const showTooltip = (event: MouseEvent, datum: FrameEntry) => {
       if (!tooltipSel) return;
       tooltipSel
         .style("display", "block")
@@ -582,27 +598,30 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       tooltipSel.style("opacity", "0").style("display", "none");
     };
 
-    const updateLabelSelection = (sel: d3.Selection<SVGTextElement, any, any, any>) => {
-      sel.each(function (d: any) {
+    const updateLabelSelection = (
+      sel: d3.Selection<SVGTextElement, FrameEntry, SVGGElement, FrameEntry>
+    ) => {
+      sel.each(function (this: SVGTextElement, d: FrameEntry) {
         const availableWidth = Math.max(0, x(d.value) - LABEL_INNER_PADDING);
-        formatLabelText(this as SVGTextElement, d, availableWidth);
+        formatLabelText(this, d, availableWidth);
       });
     };
 
     // X axis
-    const axisX = g.selectAll<SVGGElement, unknown>("g.x-axis").data([0]);
+    const axisX = g.selectAll<SVGGElement, number>("g.x-axis").data([0]);
     axisX
-      .join((enter) =>
-        enter.append("g").attr("class", "x-axis").attr("transform", `translate(0,0)`)
-      )
+      .join("g")
+      .attr("class", "x-axis")
+      .attr("transform", "translate(0,0)")
       .transition()
       .duration(Math.max(200, Math.min(frameMs - 100, 800)))
       .call(d3.axisTop(x).ticks(width < 700 ? 4 : 8).tickSizeOuter(0));
 
     // Y grid
-    const gridY = g.selectAll<SVGGElement, unknown>("g.y-grid").data([0]);
+    const gridY = g.selectAll<SVGGElement, number>("g.y-grid").data([0]);
     gridY
-      .join((enter) => enter.append("g").attr("class", "y-grid"))
+      .join("g")
+      .attr("class", "y-grid")
       .transition()
       .duration(Math.max(200, Math.min(frameMs - 100, 800)))
       .call(
@@ -616,27 +635,29 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       .attr("stroke", "#e5e7eb");
 
     // JOIN rows
-    const rowSel = g.selectAll<SVGGElement, any>("g.row").data(cur.entries, (d: any) => d.id);
+    const rowSel = g
+      .selectAll<SVGGElement, FrameEntry>("g.row")
+      .data(cur.entries, (d: FrameEntry) => d.id);
 
     // ENTER
     const rowEnter = rowSel
       .enter()
       .append("g")
       .attr("class", "row")
-      .attr("width", (d: any) => {
+      .attr("width", (d: FrameEntry) => {
         const p = prevMap.get(d.id);
-        const w = p ? x((p as any).value) : 0;
+        const w = p ? x(p.value) : 0;
         return Math.max(0.001, Number.isFinite(w) ? w : 0);
       });
 
     rowEnter
       .append("rect")
       .attr("height", y.bandwidth())
-      .attr("fill", (d: any) => color(d.id))
+      .attr("fill", (d: FrameEntry) => color(d.id))
       .attr("rx", 6)
-      .attr("width", (d: any) => {
+      .attr("width", (d: FrameEntry) => {
         const p = prevMap.get(d.id);
-        return p ? x((p as any).value) : 2;
+        return p ? x(p.value) : 2;
       });
 
     // Combined title + artist with tspans: Title (bold) + " by Artist" (smaller, thinner)
@@ -652,27 +673,27 @@ const BillboardBarRace: React.FC<RaceProps> = ({
     updateLabelSelection(labelEnter);
 
     // UPDATE + ENTER merge
-    const rowMerge = rowEnter.merge(rowSel as any);
+    const rowMerge = rowEnter.merge(rowSel);
 
     rowMerge
       .transition()
       .duration(Math.max(200, Math.min(frameMs - 100, 800)))
       .ease(d3.easeCubicInOut)
-      .attr("transform", (d: any) => `translate(0,${y(d.id) ?? 0})`);
+      .attr("transform", (d: FrameEntry) => `translate(0,${y(d.id) ?? 0})`);
 
     rowMerge
-      .select("rect")
+      .select<SVGRectElement>("rect")
       .transition()
       .duration(Math.max(200, Math.min(frameMs - 100, 800)))
       .ease(d3.easeCubicInOut)
-      .attr("fill", (d: any) => color(d.id))
-      .attr("width", (d: any) => x(d.value))
+      .attr("fill", (d: FrameEntry) => color(d.id))
+      .attr("width", (d: FrameEntry) => x(d.value))
       .attr("height", y.bandwidth());
 
-    updateLabelSelection(rowMerge.select<SVGTextElement>("text.label-main"));
+    updateLabelSelection(rowMerge.select<SVGTextElement, FrameEntry>("text.label-main"));
 
     rowMerge
-      .on("mouseenter.tooltip", function (event: MouseEvent, datum: any) {
+      .on("mouseenter.tooltip", function (event: MouseEvent, datum: FrameEntry) {
         showTooltip(event, datum);
       })
       .on("mousemove.tooltip", function (event: MouseEvent) {
@@ -690,25 +711,25 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       .remove();
 
     // Week caption
-    const caption = svg.selectAll("text.week-caption").data([cur.week]);
-    caption
-      .join(
-        (enter) =>
-          enter
-            .append("text")
-            .attr("class", "week-caption")
-            .attr("x", width - 10)
-            .attr("y", height - 10)
-            .attr("text-anchor", "end")
-            .attr("font", "600 12px system-ui, sans-serif")
-            .attr("fill", "#E5E7EB")
-            .attr("opacity", 0)
-            .text((d) => d)
-            .transition()
-            .duration(400)
-            .attr("opacity", 1),
-        (update) => update.transition().duration(400).text((d) => d)
-      );
+    const caption = svg.selectAll<SVGTextElement, string>("text.week-caption").data([cur.week]);
+    const captionEnter = caption
+      .enter()
+      .append("text")
+      .attr("class", "week-caption")
+      .attr("x", width - 10)
+      .attr("y", height - 10)
+      .attr("text-anchor", "end")
+      .attr("font", "600 12px system-ui, sans-serif")
+      .attr("fill", "#E5E7EB")
+      .attr("opacity", 0)
+      .text((d: string) => d);
+
+    captionEnter
+      .merge(caption)
+      .transition()
+      .duration(400)
+      .attr("opacity", 1)
+      .text((d: string) => d);
 
     return () => {
       hideTooltip();
@@ -841,21 +862,10 @@ export default function App() {
 
   const carryIn = useMemo(() => computeCarryIn(parsed, startYear, rollingWeeks), [parsed, startYear, rollingWeeks]);
   const lifetime = useMemo(() => computeLifetime(parsed), [parsed]);
-  const frames = useMemo(
+  const frames = useMemo<Frame[]>(
     () => makeFrames(parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode, parsed),
     [parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode, parsed]
   );
-
-  const handleFile = async (file: File) => {
-    const text = await file.text();
-    try {
-      const rows = parseCsvText(text);
-      setRawRows(rows);
-      setLoadError(null);
-    } catch (e: any) {
-      setLoadError(String(e));
-    }
-  };
 
   const controlLabelClass = "flex items-center gap-2 text-sm text-slate-100";
   const selectClass =
