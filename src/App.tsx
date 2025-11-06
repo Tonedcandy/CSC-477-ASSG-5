@@ -1,3 +1,10 @@
+/*
+  Acknowledgment:
+  Portions of this file were generated with assistance from ChatGPT
+  to support visualization and UI/UX design. Final review, integration,
+  and testing was performed by Monish Shanmugham Suresh.
+*/
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 //@ts-ignore
 import * as d3 from "d3";
