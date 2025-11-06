@@ -152,11 +152,10 @@ const InfoTip: React.FC<{ message: string }> = ({ message }) => (
     <span
       role="tooltip"
       className="
-        pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-52 -translate-x-1/2
+        pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-52 -translate-x-1/2
         rounded-md border border-slate-600 bg-slate-900/95 px-2 py-1 text-xs font-normal
-        leading-snug text-slate-100 shadow-lg
-        whitespace-pre-line               /* 👈 enables \\n line breaks */
-        group-hover:block group-focus-within:block  /* show on hover OR keyboard focus */
+        leading-snug text-slate-100 shadow-lg whitespace-pre-line
+        group-hover:block group-focus-within:block
       "
     >
       {message}
@@ -537,11 +536,13 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       const tooltipWidth = node?.offsetWidth ?? 0;
       const tooltipHeight = node?.offsetHeight ?? 0;
       const margin = 16;
-      const x = Math.min(window.scrollX + window.innerWidth - tooltipWidth - margin, event.pageX + 16);
-      const y = Math.min(window.scrollY + window.innerHeight - tooltipHeight - margin, event.pageY + 12);
-      tooltipSel
-        .style("left", `${Math.max(window.scrollX + 8, x)}px`)
-        .style("top", `${Math.max(window.scrollY + 8, y)}px`);
+      const desiredX = event.clientX + 16;
+      const desiredY = event.clientY + 12;
+      const maxX = window.innerWidth - tooltipWidth - margin;
+      const maxY = window.innerHeight - tooltipHeight - margin;
+      const clampedX = Math.max(margin, Math.min(desiredX, maxX));
+      const clampedY = Math.max(margin, Math.min(desiredY, maxY));
+      tooltipSel.style("left", `${clampedX + window.scrollX}px`).style("top", `${clampedY + window.scrollY}px`);
     };
 
     const formatTooltipHtml = (datum: any) => {
@@ -723,37 +724,38 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       <svg ref={svgRef} style={{ width: "100%", height }}>
         <g ref={gRef} />
       </svg>
-      <div className="mt-2 flex items-center gap-3 text-xs text-slate-100 sm:text-sm">
-        <label className="flex flex-1 items-center gap-2">
+      <div className="mt-3 space-y-2 text-xs text-slate-100 sm:text-sm">
+        <div className="flex items-center gap-2">
           <span className="flex items-center gap-1">
             Week
             <InfoTip message="Drag to scrub through frames. Release to continue animation from the chosen point." />
           </span>
-          <input
-            type="range"
-            min={0}
-            max={endIdx}
-            value={Math.min(frameIdx, endIdx)}
-            className="flex-1 accent-indigo-400"
-            onMouseDown={() => {
-              priorAutoplayRef.current = autoplay;
-              setIsScrubbing(true);
-            }}
-            onChange={(e) => setFrameIdx(Math.max(0, Math.min(endIdx, Number(e.target.value))))}
-            onMouseUp={() => {
-              setIsScrubbing(false);
-              // If autoplay is enabled, the interval effect will restart automatically
-            }}
-            onTouchStart={() => {
-              priorAutoplayRef.current = autoplay;
-              setIsScrubbing(true);
-            }}
-            onTouchEnd={() => setIsScrubbing(false)}
-          />
-        </label>
-        <span className="whitespace-nowrap text-slate-200" title="Current frame in the year range">
-          {`Week ${Math.min(frameIdx + 1, endIdx + 1)} / ${endIdx + 1} — ${frames[Math.min(frameIdx, endIdx)]?.week}`}
-        </span>
+          <span className="whitespace-nowrap text-slate-200" title="Current frame in the year range">
+            {`Week ${Math.min(frameIdx + 1, endIdx + 1)} / ${endIdx + 1} — Chart week ending ${frames[Math.min(frameIdx, endIdx)]?.week}`}
+          </span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={endIdx}
+          value={Math.min(frameIdx, endIdx)}
+          className="w-full accent-indigo-400"
+          aria-label="Scrub chart week"
+          onMouseDown={() => {
+            priorAutoplayRef.current = autoplay;
+            setIsScrubbing(true);
+          }}
+          onChange={(e) => setFrameIdx(Math.max(0, Math.min(endIdx, Number(e.target.value))))}
+          onMouseUp={() => {
+            setIsScrubbing(false);
+            // If autoplay is enabled, the interval effect will restart automatically
+          }}
+          onTouchStart={() => {
+            priorAutoplayRef.current = autoplay;
+            setIsScrubbing(true);
+          }}
+          onTouchEnd={() => setIsScrubbing(false)}
+        />
       </div>
     </div>
   );
@@ -864,7 +866,7 @@ export default function App() {
   return (
     <div className="p-4 font-sans text-slate-100">
       <h1 className="mb-2 text-2xl font-semibold text-white sm:text-3xl">
-        Longest Charting Billboard Hot 100™ Songs Anually (Top {topN})
+        Longest Charting Billboard Hot 100™ Songs Annually (Top {topN})
       </h1>
       <p className="mb-3  text-sm leading-relaxed text-slate-200 ">
         Bars use the selected metric for <strong>length &amp; sorting</strong> — choose <em>YTD</em>, <em>Window total (carry‑in + YTD)</em>, or <em>Lifetime (in this CSV)</em>. <strong>Pool</strong> controls which songs are considered: <em>This year only</em> (appearing this year or with carry‑in) or <em>Whole file</em> (all rows in the CSV). Artist names are normalized (feat./ft./with/x) so lifetime isn’t split across credit variants. X‑axis auto‑scales to the maximum value within the selected year.
