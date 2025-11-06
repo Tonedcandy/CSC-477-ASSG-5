@@ -138,6 +138,32 @@ const LABEL_INNER_OFFSET = 8;
 const LABEL_INNER_PADDING = LABEL_INNER_OFFSET * 2;
 const LABEL_MIN_VISIBLE_WIDTH = 18;
 
+const InfoTip: React.FC<{ message: string }> = ({ message }) => (
+  <span className="relative inline-flex group">
+    <span
+      className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-slate-500 bg-slate-800 text-[10px] font-semibold text-slate-200"
+      role="button"
+      tabIndex={0}
+      aria-label="More info"
+    >
+      ?
+    </span>
+
+    <span
+      role="tooltip"
+      className="
+        pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-52 -translate-x-1/2
+        rounded-md border border-slate-600 bg-slate-900/95 px-2 py-1 text-xs font-normal
+        leading-snug text-slate-100 shadow-lg
+        whitespace-pre-line               /* 👈 enables \\n line breaks */
+        group-hover:block group-focus-within:block  /* show on hover OR keyboard focus */
+      "
+    >
+      {message}
+    </span>
+  </span>
+);
+
 function ensureLabelSpans(textSel: d3.Selection<SVGTextElement, any, any, any>) {
   let titleSpan = textSel.select<SVGTSpanElement>("tspan.label-title");
   if (titleSpan.empty()) {
@@ -245,14 +271,16 @@ function makeFrames(
   carryIn?: Map<string, number>,
   lifetimeMap?: Map<string, number>,
   metricMode: 'ytd' | 'window' | 'lifetime' = 'window',
-  poolMode: 'year' | 'file' = 'year'
+  poolMode: 'year' | 'file' = 'year',
+  parsedAllForMeta?: ParsedRow[]
 ): Frame[] {
   // Group rows by week string
   const byWeek = d3.group(parsed, (d) => d.week);
 
   // All IDs & display metadata across the filtered dataset
   const metaAll = new Map<string, { title: string; artist: string }>();
-  parsed.forEach((r) => {
+  const metaSource = parsedAllForMeta ?? parsed;
+  metaSource.forEach((r) => {
     if (!metaAll.has(r.id)) metaAll.set(r.id, { title: r.title, artist: r.artist });
   });
 
@@ -411,7 +439,9 @@ const BillboardBarRace: React.FC<RaceProps> = ({
   // autoplay tick (halts at end of first year)
   useEffect(() => {
     if (!autoplay || frames.length === 0 || isScrubbing) return;
-    setFrameIdx(0);
+    if (frameIdx >= endIdx) {
+      setFrameIdx(0);
+    }
     const id = setInterval(() => {
       setFrameIdx((prev) => {
         if (prev >= endIdx) {
@@ -670,7 +700,7 @@ const BillboardBarRace: React.FC<RaceProps> = ({
             .attr("y", height - 10)
             .attr("text-anchor", "end")
             .attr("font", "600 12px system-ui, sans-serif")
-            .attr("fill", "#374151")
+            .attr("fill", "#E5E7EB")
             .attr("opacity", 0)
             .text((d) => d)
             .transition()
@@ -693,14 +723,18 @@ const BillboardBarRace: React.FC<RaceProps> = ({
       <svg ref={svgRef} style={{ width: "100%", height }}>
         <g ref={gRef} />
       </svg>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, font: "12px system-ui", color: "#374151" }}>
-        <label title="Manually scrub through weeks. Drag to pause playback; release to resume if Autoplay is on." style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
-          Week:
+      <div className="mt-2 flex items-center gap-3 text-xs text-slate-100 sm:text-sm">
+        <label className="flex flex-1 items-center gap-2">
+          <span className="flex items-center gap-1">
+            Week
+            <InfoTip message="Drag to scrub through frames. Release to continue animation from the chosen point." />
+          </span>
           <input
             type="range"
             min={0}
             max={endIdx}
             value={Math.min(frameIdx, endIdx)}
+            className="flex-1 accent-indigo-400"
             onMouseDown={() => {
               priorAutoplayRef.current = autoplay;
               setIsScrubbing(true);
@@ -715,10 +749,9 @@ const BillboardBarRace: React.FC<RaceProps> = ({
               setIsScrubbing(true);
             }}
             onTouchEnd={() => setIsScrubbing(false)}
-            style={{ flex: 1 }}
           />
         </label>
-        <span style={{ whiteSpace: "nowrap" }} title="Current frame in the year range">
+        <span className="whitespace-nowrap text-slate-200" title="Current frame in the year range">
           {`Week ${Math.min(frameIdx + 1, endIdx + 1)} / ${endIdx + 1} — ${frames[Math.min(frameIdx, endIdx)]?.week}`}
         </span>
       </div>
@@ -790,7 +823,7 @@ export default function App() {
   // initialize/reset startYear to minYear when data changes or if out of range
   useEffect(() => {
     if (minYear != null && (startYear == null || startYear < minYear || (maxYear != null && startYear > maxYear))) {
-      setStartYear(minYear);
+      setStartYear(maxYear);
     }
   }, [minYear, maxYear]);
 
@@ -807,8 +840,8 @@ export default function App() {
   const carryIn = useMemo(() => computeCarryIn(parsed, startYear, rollingWeeks), [parsed, startYear, rollingWeeks]);
   const lifetime = useMemo(() => computeLifetime(parsed), [parsed]);
   const frames = useMemo(
-    () => makeFrames(parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode),
-    [parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode]
+    () => makeFrames(parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode, parsed),
+    [parsedFiltered, topN, carryIn, lifetime, metricMode, poolMode, parsed]
   );
 
   const handleFile = async (file: File) => {
@@ -822,35 +855,51 @@ export default function App() {
     }
   };
 
+  const controlLabelClass = "flex items-center gap-2 text-sm text-slate-100";
+  const selectClass =
+    "ml-2 h-7 rounded-md border border-slate-600 bg-slate-800/80 px-2 text-sm text-slate-100 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400";
+  const checkboxClass =
+    "h-4 w-4 rounded border-slate-500 bg-slate-800 text-indigo-400 focus:ring-indigo-400 focus:ring-offset-0";
+
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ margin: "0 0 8px" }}>Longest Charting Billboard Hot 100™ Songs Anually (Top {topN} )</h1>
-      <p style={{ margin: "0 0 12px", color: "#444", fontSize: 13 }}>
+    <div className="p-4 font-sans text-slate-100">
+      <h1 className="mb-2 text-2xl font-semibold text-white sm:text-3xl">
+        Longest Charting Billboard Hot 100™ Songs Anually (Top {topN})
+      </h1>
+      <p className="mb-3  text-sm leading-relaxed text-slate-200 ">
         Bars use the selected metric for <strong>length &amp; sorting</strong> — choose <em>YTD</em>, <em>Window total (carry‑in + YTD)</em>, or <em>Lifetime (in this CSV)</em>. <strong>Pool</strong> controls which songs are considered: <em>This year only</em> (appearing this year or with carry‑in) or <em>Whole file</em> (all rows in the CSV). Artist names are normalized (feat./ft./with/x) so lifetime isn’t split across credit variants. X‑axis auto‑scales to the maximum value within the selected year.
       </p>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }} >
-        <label style={{ fontSize: 13 }} title="Automatically advance frames">
+      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-slate-100">
+        <label className={controlLabelClass}>
           <input
             type="checkbox"
             checked={autoplay}
+            className={checkboxClass}
             onChange={(e) => {
               setAutoplay(e.target.checked);
               triggerRemount();
             }}
-          /> Autoplay
+          />
+          <span className="flex items-center gap-1">
+            Autoplay
+            <InfoTip message="Automatically advance frames across the selected year." />
+          </span>
         </label>
 
-        <label style={{ fontSize: 13 }} title="How fast each frame advances (milliseconds per frame)">
-          Speed:
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Animation Speed
+            <InfoTip message="Milliseconds each frame remains on screen while autoplay runs." />
+          </span>
           <select
             value={frameMs}
+            className={selectClass}
             onChange={(e) => {
               setFrameMs(Number(e.target.value));
               pauseAndRestart();
               triggerRemount();
             }}
-            style={{ marginLeft: 6, height: 24 }}
           >
             {[300, 500, 700, 900, 1200, 1500, 2000].map(ms => (
               <option key={ms} value={ms}>{ms} ms</option>
@@ -858,28 +907,35 @@ export default function App() {
           </select>
         </label>
 
-        <label style={{ fontSize: 13 }} title="How many bars to display each week">
-          Top N:
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Show Top
+            <InfoTip message="Controls how many songs appear in each frame." />
+          </span>
           <select
             value={topN}
+            className={selectClass}
             onChange={(e) => {
               const n = Number(e.target.value);
               setTopN(n);
               triggerRemount(); // 🚀 force BillboardBarRace remount to avoid artifacts
               pauseAndRestart();         // ⏸️ brief pause then resume autoplay
             }}
-            style={{ marginLeft: 6, height: 24 }}
           >
-            {[5, 10, 15, 20, 25, 30, 40, 50].map(n => (
-              <option key={n} value={n}>{n}</option>
+            {[5, 10, 15, 20, 25, 30].map(n => (
+              <option key={n} value={n}>{n + " Songs"}</option>
             ))}
           </select>
         </label>
 
-        <label style={{ fontSize: 13 }} title="First calendar year to include in the animation">
-          Year start:
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Year
+            <InfoTip message="Select calendar year to be included in the animation timeline." />
+          </span>
           <select
             value={startYear ?? ''}
+            className={selectClass}
             onChange={(e) => {
               const v = Number(e.target.value);
               setStartYear(Number.isFinite(v) ? v : null);
@@ -887,7 +943,6 @@ export default function App() {
               triggerRemount();
             }}
             disabled={minYear == null || maxYear == null}
-            style={{ marginLeft: 6, height: 24 }}
           >
             {minYear != null && maxYear != null &&
               Array.from({ length: (maxYear - minYear + 1) }, (_, i) => maxYear - i).map(y => (
@@ -896,16 +951,19 @@ export default function App() {
           </select>
         </label>
 
-        <label style={{ fontSize: 13 }} title={"Carry-in window before Jan 1 of the start year (adds baseline weeks to the bar). Set to 0 for pure YTD."}>
-          Carry‑in:
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Carry‑in
+            <InfoTip message="Weeks counted before Jan 1 of selected year to add a rolling baseline. Use 0 for pure Year-to-date (YTD) totals." />
+          </span>
           <select
             value={rollingWeeks}
+            className={selectClass}
             onChange={(e) => {
               setRollingWeeks(Number(e.target.value));
               pauseAndRestart();
               triggerRemount();
             }}
-            style={{ marginLeft: 6, height: 24 }}
           >
             {[0, 13, 26, 52, 104, 520].map(w => (
               <option key={w} value={w}>{w} weeks</option>
@@ -913,37 +971,47 @@ export default function App() {
           </select>
         </label>
 
-        <label style={{ fontSize: 13 }} title="Which metric drives bar length & sorting">
-          Metric: {" "}
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Visualization Metric
+            <InfoTip
+              message={`Defines the value that ranks songs and sizes bars:\n1. Selected YTD: Weeks in ${startYear ?? 'the selected year'} only.
+2. Window total: Carry-in (${rollingWeeks} weeks) + selected year's weeks.
+3. Lifetime: Include every week from 1958 onward (ignores selected year & carry-in).`}
+            />             </span>
           <select
             value={metricMode}
+            className={selectClass}
             onChange={(e) => {
               setMetricMode(e.target.value as 'ytd' | 'window' | 'lifetime');
               triggerRemount();
             }}
-            style={{ height: 24 }}
           >
-            <option value="ytd">This year (YTD)</option>
-            <option value="window">Window total (carry‑in + YTD)</option>
-            <option value="lifetime">Lifetime (in file)</option>
+            <option value="ytd">Selected YTD</option>
+            <option value="window">Window Total</option>
+            <option value="lifetime">Lifetime</option>
           </select>
         </label>
 
-        <label style={{ fontSize: 13 }} title="Which songs are eligible to appear in the race">
-          Pool: {" "}
+        <label className={controlLabelClass}>
+          <span className="flex items-center gap-1">
+            Pool
+            <InfoTip
+              message={`Defines which songs are included in the race:\n1. Selected Year: Limit entries to songs active in ${startYear ?? 'the selected year.'}.\n2. Lifetime: Include every song from 1958 onward.`}
+            />          </span>
           <select
             value={poolMode}
+            className={selectClass}
             onChange={(e) => {
               setPoolMode(e.target.value as 'year' | 'file');
               triggerRemount();
             }}
-            style={{ height: 24 }}
           >
-            <option value="year">This year only</option>
-            <option value="file">Whole file</option>
+            <option value="year">Selected Year</option>
+            <option value="file">Lifetime</option>
           </select>
         </label>
-        {loadError && <span style={{ color: "crimson", fontSize: 12 }}>Failed to load CSV: {loadError}</span>}
+        {loadError && <span className="text-xs font-medium text-rose-300">Failed to load CSV: {loadError}</span>}
       </div>
 
       <BillboardBarRace key={`race-${raceKey}`} frames={frames} frameMs={frameMs} autoplay={autoplay} />
